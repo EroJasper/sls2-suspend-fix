@@ -4,6 +4,10 @@ If your Surface Laptop Studio 2 (or the original Surface Laptop Studio) runs
 Linux and sometimes **never wakes up after you close the lid**, this fixes it.
 No reboot needed, and it can be undone with one command.
 
+I want to also state that I'm not the original person who figured this out. 
+The real credit goes to [David Obando](https://github.com/DavidObando) for coming up with this workaround. 
+There's more info at the bottom of the page.
+
 This guide assumes you have never done anything like this before. Every step
 tells you exactly what to type and what you should see.
 
