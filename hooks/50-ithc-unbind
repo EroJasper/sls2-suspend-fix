@@ -1,0 +1,58 @@
+#!/bin/sh
+# 50-ithc-unbind - systemd sleep hook for the Surface Laptop Studio (1 and 2)
+#
+# Unbinds the Intel Touch Host Controller (ithc) driver before suspend and
+# rebinds it after resume.
+#
+# Why: on these machines suspend-to-idle (s2idle) hangs at
+# "PM: suspend entry (s2idle)" whenever the machine is left asleep for more
+# than a few seconds. It never wakes and has to be forced off. The ithc driver
+# has no suspend/resume callbacks and races the NVIDIA driver during suspend.
+# Taking ithc out of the picture for the duration of the sleep avoids the hang.
+# Upstream discussion and the original workaround:
+#   https://github.com/linux-surface/linux-surface/issues/1014
+#
+# Effects: touchscreen, stylus and touchpad (all behind ithc) are gone while
+# asleep and return when ithc rebinds. The keyboard goes through the Surface
+# Aggregator, not ithc, so it is unaffected. The rebind recreates the hidraw
+# nodes, so udev starts iptsd again by itself.
+#
+# Devices are discovered at "pre" time and remembered in /run so the "post"
+# side rebinds exactly what was unbound. Failures never block the sleep.
+# Each step is logged to the journal under the tag "ithc-sleep".
+
+STATE=/run/ithc-sleep-unbound
+DRV=/sys/bus/pci/drivers/ithc
+
+case "$1" in
+  pre)
+    : > "$STATE"
+    for dev in "$DRV"/0000:*; do
+      [ -e "$dev" ] || continue
+      pci=$(basename "$dev")
+      if echo "$pci" > "$DRV/unbind" 2>/dev/null; then
+        echo "$pci" >> "$STATE"
+        logger -t ithc-sleep "unbound $pci before $2"
+      else
+        logger -t ithc-sleep "failed to unbind $pci before $2"
+      fi
+    done
+    ;;
+  post)
+    [ -r "$STATE" ] || exit 0
+    while read -r pci; do
+      [ -n "$pci" ] || continue
+      if [ -e "/sys/bus/pci/devices/$pci/driver" ]; then
+        continue
+      fi
+      if echo "$pci" > "$DRV/bind" 2>/dev/null; then
+        logger -t ithc-sleep "rebound $pci after $2"
+      else
+        logger -t ithc-sleep "failed to rebind $pci after $2"
+      fi
+    done < "$STATE"
+    rm -f "$STATE"
+    ;;
+esac
+
+exit 0
