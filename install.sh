@@ -296,11 +296,43 @@ write_hook() {
 # nodes, so udev starts iptsd again by itself.
 #
 # Devices are discovered at "pre" time and remembered in /run so the "post"
-# side rebinds exactly what was unbound. Failures never block the sleep.
-# Each step is logged to the journal under the tag "ithc-sleep".
+# side rebinds exactly what was unbound. The "post" side also rebinds any
+# ithc-capable device that has no driver, such as one whose probe timed out
+# after an earlier wake, and retries a failed rebind a few times. Failures
+# never block the sleep. Each step is logged to the journal under the tag
+# "ithc-sleep".
 
 STATE=/run/ithc-sleep-unbound
 DRV=/sys/bus/pci/drivers/ithc
+
+# PCI functions that ithc can drive but that have no driver right now.
+unbound_ithc_devices() {
+  aliases=$(modinfo -F alias ithc 2>/dev/null) || return 0
+  for dev in /sys/bus/pci/devices/*; do
+    [ -e "$dev/driver" ] && continue
+    modalias=$(cat "$dev/modalias" 2>/dev/null) || continue
+    printf '%s\n' "$aliases" | while read -r pattern; do
+      case "$modalias" in
+        $pattern) basename "$dev"; break ;;
+      esac
+    done
+  done
+}
+
+# The touchpad sometimes times out (-110) while starting after a wake; another
+# try a moment later works.
+rebind() {
+  for attempt in 1 2 3; do
+    [ -e "/sys/bus/pci/devices/$1/driver" ] && return 0
+    if echo "$1" > "$DRV/bind" 2>/dev/null; then
+      logger -t ithc-sleep "rebound $1 after $2 (attempt $attempt)"
+      return 0
+    fi
+    logger -t ithc-sleep "failed to rebind $1 after $2 (attempt $attempt)"
+    [ "$attempt" -lt 3 ] && sleep 2
+  done
+  return 1
+}
 
 case "$1" in
   pre)
@@ -317,19 +349,11 @@ case "$1" in
     done
     ;;
   post)
-    [ -r "$STATE" ] || exit 0
-    while read -r pci; do
-      [ -n "$pci" ] || continue
-      if [ -e "/sys/bus/pci/devices/$pci/driver" ]; then
-        continue
-      fi
-      if echo "$pci" > "$DRV/bind" 2>/dev/null; then
-        logger -t ithc-sleep "rebound $pci after $2"
-      else
-        logger -t ithc-sleep "failed to rebind $pci after $2"
-      fi
-    done < "$STATE"
+    pending=$({ cat "$STATE" 2>/dev/null; unbound_ithc_devices; } | sort -u)
     rm -f "$STATE"
+    for pci in $pending; do
+      rebind "$pci" "$2"
+    done
     ;;
 esac
 

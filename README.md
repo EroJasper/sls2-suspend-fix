@@ -160,7 +160,9 @@ It is a short script that runs right before the laptop sleeps and right after
 it wakes. You can read it here: [hooks/50-ithc-unbind](hooks/50-ithc-unbind).
 The one thing you will notice from it: while the laptop is asleep, the
 touchscreen, pen and touchpad are turned off. They come back the moment it
-wakes. The keyboard is not affected.
+wakes. The keyboard is not affected. If one of them fails to start again
+after a wake (the touchpad occasionally times out), the hook tries again a
+couple of times, and the next wake also picks up anything left behind.
 
 Nothing else changes. No drivers, no packages, no desktop settings.
 
